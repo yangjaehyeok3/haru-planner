@@ -1,0 +1,760 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>하루 플래너</title>
+<meta name="description" content="할 일과 급한 일정을 AI가 하루에 배치하고, 아침식사 여부에 맞춰 기상 시간을 계산해요.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="하루">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#EEF1F6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#10141D" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: 좌측 = 기상 알람 + 입력 패널, 우측 = 하루 타임라인. 좁은 화면에서는 한 줄로 쌓임 */
+:root{
+  --bg:#EEF1F6; --surface:#FFFFFF; --sunk:#E4E8F0; --line:#D3D9E4;
+  --ink:#172033; --muted:#5D6880;
+  --dawn:#E2732A; --dawn-soft:#FCE9DB;
+  --task:#1F8A7A; --task-soft:#DDF1EC;
+  --fixed:#3B5BA9; --fixed-soft:#E1E8F7;
+  --danger:#C4373B; --danger-soft:#F8E1E1;
+  --font-body:"IBM Plex Sans KR",-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --r:12px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#10141D; --surface:#181E2A; --sunk:#202838; --line:#2D3648;
+  --ink:#E7EBF3; --muted:#97A2B8;
+  --dawn:#F2944F; --dawn-soft:#3A2618;
+  --task:#4CC3AE; --task-soft:#15322D;
+  --fixed:#86A2EA; --fixed-soft:#1E2840;
+  --danger:#F07A7D; --danger-soft:#3A1C1E; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#10141D; --surface:#181E2A; --sunk:#202838; --line:#2D3648;
+  --ink:#E7EBF3; --muted:#97A2B8;
+  --dawn:#F2944F; --dawn-soft:#3A2618;
+  --task:#4CC3AE; --task-soft:#15322D;
+  --fixed:#86A2EA; --fixed-soft:#1E2840;
+  --danger:#F07A7D; --danger-soft:#3A1C1E; color-scheme:dark}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+[hidden]{display:none!important}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0;-webkit-tap-highlight-color:transparent;background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:15px;line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px}
+.wrap{max-width:1120px;margin:0 auto;display:grid;gap:20px}
+header.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+h1{font-size:26px;margin:0;letter-spacing:-.02em;text-wrap:balance}
+h1 small{display:block;font-size:13px;font-weight:500;color:var(--muted);letter-spacing:0}
+h2{font-size:15px;margin:0;font-weight:700}
+.datebar{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.cols{display:grid;grid-template-columns:minmax(0,380px) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:860px){.cols{grid-template-columns:minmax(0,1fr)}}
+.stack{display:grid;gap:16px;min-width:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:grid;gap:12px;min-width:0}
+.panel-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.hint{color:var(--muted);font-size:13px;margin:0}
+label{font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.02em;display:grid;gap:4px}
+input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:0;width:100%}
+input[type=checkbox]{width:18px;height:18px;accent-color:var(--task);padding:0}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--fixed);outline-offset:2px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row>*{flex:1 1 90px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+button{font:inherit;font-weight:600;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:8px 12px}
+button:hover{background:var(--sunk)}
+button:disabled{opacity:.5;cursor:default}
+.btn-dawn{background:var(--dawn);border-color:var(--dawn);color:#fff}
+.btn-dawn:hover{background:var(--dawn);filter:brightness(1.06)}
+.btn-task{background:var(--task);border-color:var(--task);color:#fff}
+.btn-task:hover{background:var(--task);filter:brightness(1.06)}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--muted);padding:6px 8px}
+.btn-sm{padding:5px 9px;font-size:13px}
+
+/* 알람 카드 */
+.alarm{background:linear-gradient(160deg,var(--dawn-soft),var(--surface) 70%);border-color:color-mix(in srgb,var(--dawn) 35%,var(--line))}
+.wake{font-family:var(--font-mono);font-size:52px;font-weight:600;line-height:1;letter-spacing:-.03em;color:var(--ink);font-variant-numeric:tabular-nums}
+.wake small{font-size:15px;color:var(--muted);font-family:var(--font-body);font-weight:500;letter-spacing:0;margin-left:6px}
+.calc{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px;color:var(--muted)}
+.calc b{font-family:var(--font-mono);font-weight:600;color:var(--ink)}
+.calc .op{opacity:.6}
+.toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.toggle span{font-weight:600;font-size:14px}
+.switch{position:relative;width:46px;height:26px;flex:none;border-radius:13px;background:var(--sunk);border:1px solid var(--line);padding:0}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:var(--muted);transition:transform .15s}
+.switch[aria-checked="true"]{background:var(--dawn);border-color:var(--dawn)}
+.switch[aria-checked="true"]::after{transform:translateX(20px);background:#fff}
+.ringing{background:var(--dawn);color:#fff;border-radius:10px;padding:12px;display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:700}
+
+/* AI 바 */
+.ai-bar{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.ai-tip{font-size:14px;min-width:0;flex:1 1 260px}
+.ai-tip b{color:var(--task)}
+
+/* 타임라인 */
+.timeline{display:grid;gap:6px}
+.slot{display:grid;grid-template-columns:62px minmax(0,1fr);gap:10px;align-items:stretch}
+.t{font-family:var(--font-mono);font-size:13px;color:var(--muted);text-align:right;padding-top:10px;font-variant-numeric:tabular-nums}
+.item{border-radius:10px;padding:10px 12px;border-left:4px solid;display:grid;gap:2px;min-width:0;text-align:left;width:100%;font-weight:400}
+.item .title{font-weight:600;overflow-wrap:anywhere}
+.item .meta{font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.k-fixed{background:var(--fixed-soft);border-color:var(--fixed)}
+.k-sudden{background:var(--dawn-soft);border-color:var(--dawn)}
+.k-task{background:var(--task-soft);border-color:var(--task)}
+.k-wake{background:transparent;border:1px dashed var(--dawn);border-left:4px solid var(--dawn)}
+.k-done{opacity:.55}
+.k-done .title{text-decoration:line-through}
+button.item:hover{filter:brightness(.97);background-color:inherit}
+.gap{grid-column:2;font-size:12px;color:var(--muted);padding:2px 12px;border-left:2px dotted var(--line);margin-left:2px}
+.chip{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:999px;letter-spacing:.02em}
+.c-fixed{background:var(--fixed);color:var(--surface)}
+.c-sudden{background:var(--dawn);color:#fff}
+.c-task{background:var(--task);color:var(--surface)}
+.c-changed{background:var(--surface);color:var(--fixed);border:1px solid var(--fixed)}
+.c-conflict{background:var(--danger);color:#fff}
+.c-p1{background:var(--danger-soft);color:var(--danger)}
+.c-p2{background:var(--dawn-soft);color:var(--dawn)}
+.c-p3{background:var(--sunk);color:var(--muted)}
+.empty{border:1px dashed var(--line);border-radius:var(--r);padding:24px 16px;text-align:center;color:var(--muted);display:grid;gap:10px;justify-items:center}
+
+/* 할 일 목록 */
+.tasks{display:grid;gap:6px;list-style:none;padding:0;margin:0}
+.tasks li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 10px;border-radius:8px;background:var(--bg)}
+.tasks li.done .tt{text-decoration:line-through;color:var(--muted)}
+.tt{font-weight:600;overflow-wrap:anywhere}
+.tm{font-size:12px;color:var(--muted);display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.unsched{color:var(--danger);font-weight:600}
+
+details.settings summary{cursor:pointer;font-weight:700;font-size:15px;list-style:none;display:flex;justify-content:space-between}
+details.settings summary::after{content:"+";color:var(--muted)}
+details.settings[open] summary::after{content:"–"}
+details.settings>div{display:grid;gap:10px;margin-top:12px}
+
+/* 편집 시트 */
+.sheet-bg{position:fixed;inset:0;background:rgba(10,14,22,.45);display:flex;align-items:flex-end;justify-content:center;z-index:50;
+  padding:16px max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+@media (min-width:640px){.sheet-bg{align-items:center}}
+.sheet{background:var(--surface);border-radius:14px;padding:18px;width:100%;max-width:420px;display:grid;gap:12px;border:1px solid var(--line)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:max(20px,calc(env(safe-area-inset-bottom,0px) + 12px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;z-index:60;max-width:calc(100% - 32px);text-align:center}
+.status{font-size:12px;color:var(--muted)}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .8s linear infinite;vertical-align:-1px}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}.switch::after{transition:none}}
+.install{background:var(--fixed-soft);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;display:flex;gap:10px;align-items:center;justify-content:space-between;font-size:14px}
+input,select{font-size:16px} /* iOS 확대 방지 */
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="install" id="installTip" hidden>
+    <span>아이폰에서 앱처럼 쓰려면 Safari 아래쪽 <b>공유 버튼</b> → <b>홈 화면에 추가</b>를 눌러 주세요.</span>
+    <button class="btn-ghost btn-sm" id="installClose" aria-label="닫기">닫기</button>
+  </div>
+  <header class="top">
+    <h1>하루 플래너<small>할 일 · 바뀐 일정 · 급한 일정을 AI가 하루에 맞춰 배치해요</small></h1>
+    <div class="datebar">
+      <button class="btn-sm" id="prevDay" aria-label="전날">‹</button>
+      <button class="btn-sm" id="todayBtn">오늘</button>
+      <button class="btn-sm" id="tmrBtn">내일</button>
+      <input type="date" id="datePick" style="width:auto">
+      <button class="btn-sm" id="nextDay" aria-label="다음날">›</button>
+    </div>
+  </header>
+
+  <div class="cols">
+    <div class="stack">
+      <!-- 기상 알람 -->
+      <section class="panel alarm" aria-labelledby="alarmH">
+        <div class="panel-head"><h2 id="alarmH">기상 알람</h2><span class="status" id="alarmDay"></span></div>
+        <div class="wake" id="wakeTime">--:--</div>
+        <div class="calc" id="wakeCalc"></div>
+        <div class="toggle">
+          <span>이날 아침 먹을래요</span>
+          <button class="switch" id="bfSwitch" role="switch" aria-checked="true" aria-label="아침식사 여부"></button>
+        </div>
+        <div id="ringBox" hidden class="ringing"><span id="ringText">일어날 시간이에요</span><button class="btn-sm" id="ringStop">끄기</button></div>
+        <div class="row">
+          <button class="btn-dawn" id="armBtn">이 시간에 알람 켜기</button>
+          <button id="copyAlarm">시간 복사</button>
+        </div>
+        <p class="hint" id="armHint">알람은 이 페이지를 열어 둔 동안 울려요. 휴대폰 시계 앱에도 같은 시간으로 맞춰 두면 확실해요.</p>
+      </section>
+
+      <!-- 급한 일정 -->
+      <section class="panel" aria-labelledby="suddenH">
+        <h2 id="suddenH">갑자기 생긴 일정</h2>
+        <p class="hint">말하듯 적으면 AI가 시간을 읽고, 겹치는 할 일은 자동으로 옮겨요.</p>
+        <form id="suddenForm" class="row">
+          <input id="suddenText" placeholder="예: 오늘 오후 3시에 팀플 회의 1시간" style="flex:3 1 200px" autocomplete="off">
+          <button class="btn-dawn" id="suddenBtn" type="submit">추가</button>
+        </form>
+      </section>
+
+      <!-- 고정 일정 -->
+      <section class="panel" aria-labelledby="fixedH">
+        <h2 id="fixedH">고정 일정 추가</h2>
+        <form id="eventForm" class="stack" style="gap:8px">
+          <input id="evTitle" placeholder="수업, 알바, 약속…" required>
+          <div class="grid2">
+            <label>시작<input type="time" id="evStart" value="09:00" required></label>
+            <label>끝<input type="time" id="evEnd" value="10:30" required></label>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="evWeekly"> 매주 같은 요일 반복 (4주)</label>
+          <button type="submit">일정 추가</button>
+        </form>
+      </section>
+
+      <!-- 할 일 -->
+      <section class="panel" aria-labelledby="taskH">
+        <div class="panel-head"><h2 id="taskH">할 일</h2><span class="status" id="taskCount"></span></div>
+        <form id="taskForm" class="stack" style="gap:8px">
+          <input id="tkTitle" placeholder="과제, 공부, 장보기…" required>
+          <div class="grid3">
+            <label>걸리는 시간<select id="tkMin">
+              <option value="20">20분</option><option value="30">30분</option><option value="45">45분</option>
+              <option value="60" selected>1시간</option><option value="90">1시간 30분</option><option value="120">2시간</option><option value="180">3시간</option>
+            </select></label>
+            <label>중요도<select id="tkPri"><option value="1">높음</option><option value="2" selected>보통</option><option value="3">낮음</option></select></label>
+            <label>마감<input type="date" id="tkDue"></label>
+          </div>
+          <button class="btn-task" type="submit">할 일 추가</button>
+        </form>
+        <ul class="tasks" id="taskList"></ul>
+      </section>
+
+      <details class="panel settings">
+        <summary>생활 패턴 설정</summary>
+        <div>
+          <p class="hint">기상 시간 = 첫 일정 − 이동 − 준비 − (아침식사)</p>
+          <div class="grid3">
+            <label>준비(분)<input type="number" id="sPrep" min="0" max="180" step="5"></label>
+            <label>이동(분)<input type="number" id="sTravel" min="0" max="240" step="5"></label>
+            <label>아침식사(분)<input type="number" id="sMeal" min="0" max="120" step="5"></label>
+          </div>
+          <div class="grid3">
+            <label>활동 시작<input type="time" id="sDayStart"></label>
+            <label>활동 끝<input type="time" id="sDayEnd"></label>
+            <label>일정 없는 날 기상<input type="time" id="sFree"></label>
+          </div>
+          <label>가장 이른 기상 한계<input type="time" id="sEarliest"></label>
+          <div class="row"><button id="resetAll" class="btn-sm">모든 데이터 지우기</button></div>
+          <div id="resetConfirm" hidden class="row"><span class="hint" style="flex:2 1 100%">정말 지울까요? 되돌릴 수 없어요.</span><button id="resetYes" class="btn-sm" style="color:var(--danger)">지우기</button><button id="resetNo" class="btn-sm">취소</button></div>
+        </div>
+      </details>
+      <p class="status" id="syncStatus">저장 위치 확인 중…</p>
+    </div>
+
+    <!-- 타임라인 -->
+    <div class="stack">
+      <div class="ai-bar">
+        <div class="ai-tip" id="aiTip">할 일을 넣고 <b>AI 자동 배치</b>를 누르면 빈 시간에 맞춰 하루를 짜 줘요.</div>
+        <div class="row" style="flex:0 0 auto">
+          <button class="btn-task" id="aiPlan">AI 자동 배치</button>
+          <button class="btn-ghost btn-sm" id="clearPlan">배치 비우기</button>
+        </div>
+      </div>
+      <section class="panel" aria-labelledby="tlH">
+        <div class="panel-head"><h2 id="tlH">하루 타임라인</h2><span class="status" id="tlDate"></span></div>
+        <div class="timeline" id="timeline"></div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div class="sheet-bg" id="sheet" hidden>
+  <form class="sheet" id="sheetForm">
+    <h2 id="sheetH">일정 바꾸기</h2>
+    <input id="shTitle" required>
+    <label>날짜<input type="date" id="shDate" required></label>
+    <div class="grid2">
+      <label>시작<input type="time" id="shStart" required></label>
+      <label>끝<input type="time" id="shEnd" required></label>
+    </div>
+    <p class="hint" id="shNote"></p>
+    <div class="row">
+      <button type="submit" class="btn-task">저장</button>
+      <button type="button" id="shDelete" style="color:var(--danger)">삭제</button>
+      <button type="button" id="shCancel">닫기</button>
+    </div>
+  </form>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(() => {
+/* ---------- 유틸 ---------- */
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pad = n => String(n).padStart(2, "0");
+const ds = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const today = () => ds(new Date());
+const addDays = (s, n) => { const d = new Date(s + "T00:00"); d.setDate(d.getDate() + n); return ds(d); };
+const toMin = t => { const m = /^(\d{1,2}):(\d{2})$/.exec(t || ""); return m ? (+m[1]) * 60 + (+m[2]) : NaN; };
+const fromMin = m => { m = Math.max(0, Math.min(24*60-1, Math.round(m))); return `${pad(Math.floor(m/60))}:${pad(m%60)}`; };
+const dur = m => { m = Math.round(m); const h = Math.floor(m/60), r = m%60; return h ? (r ? `${h}시간 ${r}분` : `${h}시간`) : `${r}분`; };
+const WD = ["일","월","화","수","목","금","토"];
+const dayLabel = s => { const d = new Date(s + "T00:00"); const rel = s === today() ? "오늘" : s === addDays(today(),1) ? "내일" : s === addDays(today(),-1) ? "어제" : ""; return `${d.getMonth()+1}월 ${d.getDate()}일 (${WD[d.getDay()]})${rel ? " · " + rel : ""}`; };
+const uid = () => Math.random().toString(36).slice(2, 10);
+let toastT;
+const toast = msg => { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 3200); };
+
+/* ---------- 상태 ---------- */
+const DEFAULT = () => ({
+  v: 1,
+  events: [],   // {id,date,title,start,end,kind:'fixed'|'sudden',changed,orig}
+  tasks: [],    // {id,title,minutes,priority,due,done,created}
+  plans: {},    // date -> {blocks:[{taskId,start,end}], unscheduled:[], tip, by, at}
+  breakfast: {},// date -> bool
+  settings: { prep: 30, travel: 30, meal: 20, dayStart: "08:00", dayEnd: "23:00", free: "08:30", earliest: "05:30", defaultBreakfast: true }
+});
+let S = DEFAULT();
+let view = today();
+const LS_KEY = "haru-planner-v1";
+
+function normalize(x) {
+  const d = DEFAULT();
+  if (!x || typeof x !== "object") return d;
+  return {
+    v: 1,
+    events: Array.isArray(x.events) ? x.events.filter(e => e && e.id && e.date) : [],
+    tasks: Array.isArray(x.tasks) ? x.tasks.filter(t => t && t.id) : [],
+    plans: x.plans && typeof x.plans === "object" ? x.plans : {},
+    breakfast: x.breakfast && typeof x.breakfast === "object" ? x.breakfast : {},
+    settings: Object.assign(d.settings, x.settings || {})
+  };
+}
+
+/* ---------- 저장 (이 기기) ---------- */
+function lsRead() { try { const r = localStorage.getItem(LS_KEY); return r ? JSON.parse(r) : null; } catch { return null; } }
+function save() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(S)); $("syncStatus").textContent = "이 기기에 저장됨"; }
+  catch { $("syncStatus").textContent = "저장 공간을 쓸 수 없어요 · 창을 닫으면 사라져요"; }
+}
+
+/* ---------- AI (서버 /api/ai → Claude) ---------- */
+async function callAI(body) {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 60000);
+  try {
+    const r = await fetch("api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: ctl.signal });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw { code: j.error || "http_" + r.status };
+    return j;
+  } catch (e) { throw e?.code ? e : { code: navigator.onLine ? "network" : "offline" }; }
+  finally { clearTimeout(t); }
+}
+const aiErrorText = code => ({ rate_limited: "AI 사용량이 잠시 많아요.", no_key: "서버에 AI 키가 아직 설정되지 않았어요.", bad_key: "서버의 AI 키가 올바르지 않아요.", offline: "오프라인이에요.", refused: "AI가 이 요청은 처리하지 않았어요." }[code] || "AI 응답을 못 받았어요.");
+
+/* ---------- 계산 ---------- */
+const eventsOn = d => S.events.filter(e => e.date === d).sort((a,b) => toMin(a.start) - toMin(b.start));
+const hasBreakfast = d => d in S.breakfast ? !!S.breakfast[d] : !!S.settings.defaultBreakfast;
+function wakeInfo(d) {
+  const st = S.settings, evs = eventsOn(d);
+  const bf = hasBreakfast(d);
+  const meal = bf ? +st.meal || 0 : 0;
+  if (!evs.length) {
+    const w = toMin(st.free);
+    return { wake: w, first: null, ready: w + (+st.prep||0) + meal, bf, meal };
+  }
+  const first = evs[0];
+  let w = toMin(first.start) - (+st.travel||0) - (+st.prep||0) - meal;
+  const early = toMin(st.earliest);
+  const clamped = w < early;
+  if (clamped) w = early;
+  return { wake: w, first, ready: toMin(first.start), bf, meal, clamped };
+}
+function busyOn(d) {
+  return eventsOn(d).map(e => [toMin(e.start), toMin(e.end)]).filter(([a,b]) => b > a);
+}
+function freeGaps(d, buffer = 10) {
+  const st = S.settings, wi = wakeInfo(d);
+  let start = Math.max(toMin(st.dayStart), wi.first ? wi.wake + (+st.prep||0) + wi.meal : wi.ready);
+  if (d === today()) { const n = new Date(); start = Math.max(start, Math.ceil((n.getHours()*60 + n.getMinutes())/10)*10); }
+  const end = toMin(st.dayEnd);
+  const busy = busyOn(d).map(([a,b]) => [a - buffer, b + buffer]).sort((a,b) => a[0]-b[0]);
+  const gaps = []; let cur = start;
+  for (const [a,b] of busy) { if (a > cur) gaps.push([cur, Math.min(a, end)]); cur = Math.max(cur, b); }
+  if (cur < end) gaps.push([cur, end]);
+  return gaps.filter(([a,b]) => b - a >= 15);
+}
+const openTasksFor = d => S.tasks.filter(t => !t.done && (!t.due || t.due >= d))
+  .sort((a,b) => a.priority - b.priority || (a.due || "9999").localeCompare(b.due || "9999") || b.minutes - a.minutes);
+// 다른 날에 이미 배치된 할 일은 제외
+function plannedElsewhere(d) {
+  const ids = new Set();
+  for (const [k, p] of Object.entries(S.plans)) if (k !== d && k >= today()) (p.blocks||[]).forEach(b => ids.add(b.taskId));
+  return ids;
+}
+
+/* 로컬 스케줄러 (AI가 안 될 때, 그리고 급한 일정이 끼어들었을 때 즉시 재배치) */
+function localPlan(d) {
+  const other = plannedElsewhere(d);
+  const tasks = openTasksFor(d).filter(t => !other.has(t.id));
+  const gaps = freeGaps(d).map(g => g.slice());
+  const blocks = [], unscheduled = [];
+  for (const t of tasks) {
+    let need = t.minutes;
+    const i = gaps.findIndex(([a,b]) => b - a >= need);
+    if (i >= 0) { const a = gaps[i][0]; blocks.push({ taskId: t.id, start: fromMin(a), end: fromMin(a + need) }); gaps[i][0] = a + need + 10; continue; }
+    // 나눠서 넣기 (30분 이상 조각)
+    const parts = [];
+    for (const g of gaps) { if (need <= 0) break; const len = Math.min(need, g[1] - g[0]); if (len >= 30) { parts.push([g, len]); need -= len; } }
+    if (need <= 0) { for (const [g, len] of parts) { blocks.push({ taskId: t.id, start: fromMin(g[0]), end: fromMin(g[0] + len) }); g[0] += len + 10; } }
+    else unscheduled.push(t.id);
+  }
+  blocks.sort((a,b) => toMin(a.start) - toMin(b.start));
+  return { blocks, unscheduled, by: "자동", at: Date.now() };
+}
+
+function validateBlocks(d, raw) {
+  const ok = [], taskIds = new Set(S.tasks.map(t => t.id));
+  const busy = busyOn(d), end = toMin(S.settings.dayEnd);
+  for (const b of Array.isArray(raw) ? raw : []) {
+    if (!b || !taskIds.has(String(b.taskId))) continue;
+    const a = toMin(b.start), z = toMin(b.end);
+    if (!(z > a) || z > end + 1) continue;
+    if (busy.some(([x,y]) => a < y && z > x)) continue;
+    if (ok.some(o => a < toMin(o.end) && z > toMin(o.start))) continue;
+    ok.push({ taskId: String(b.taskId), start: fromMin(a), end: fromMin(z) });
+  }
+  return ok.sort((a,b) => toMin(a.start) - toMin(b.start));
+}
+
+async function aiPlan(d) {
+  const btn = $("aiPlan");
+  const other = plannedElsewhere(d);
+  const tasks = openTasksFor(d).filter(t => !other.has(t.id));
+  if (!tasks.length) { toast("배치할 할 일이 없어요. 왼쪽에서 할 일을 먼저 추가해 주세요."); return; }
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> 짜는 중';
+  $("aiTip").textContent = "AI가 빈 시간과 마감을 보고 하루를 짜는 중이에요…";
+  let plan = null, note = "";
+  const wi = wakeInfo(d), gaps = freeGaps(d);
+  try {
+    const r = await callAI({
+      kind: "plan", date: d, weekday: WD[new Date(d+"T00:00").getDay()],
+      now: d === today() ? fromMin(new Date().getHours()*60+new Date().getMinutes()) : "",
+      wake: fromMin(wi.wake), dayEnd: S.settings.dayEnd,
+      events: eventsOn(d).map(e => ({ title: e.title, start: e.start, end: e.end })),
+      gaps: gaps.map(([a,b]) => [fromMin(a), fromMin(b)]),
+      tasks: tasks.map(t => ({ id: t.id, title: t.title, minutes: t.minutes, priority: t.priority, due: t.due || null }))
+    });
+    const blocks = validateBlocks(d, r?.blocks);
+    if (blocks.length || (r?.unscheduled || []).length) {
+      const placed = new Set(blocks.map(b => b.taskId));
+      plan = { blocks, unscheduled: tasks.filter(t => !placed.has(t.id)).map(t => t.id), tip: typeof r.tip === "string" ? r.tip.slice(0, 300) : "", by: "AI", at: Date.now() };
+    }
+  } catch (e) { note = aiErrorText(e?.code); }
+  if (!plan) { plan = localPlan(d); plan.tip = `${note} 대신 중요도·마감 순으로 자동 배치했어요.`; }
+  S.plans[d] = plan; save(); render();
+  btn.disabled = false; btn.textContent = "AI 자동 배치";
+  toast(plan.by === "AI" ? `AI가 ${plan.blocks.length}개 블록을 배치했어요` : "자동 배치를 마쳤어요");
+}
+
+/* 일정이 바뀌거나 끼어들면 겹친 할 일만 다시 배치 */
+function conflicts(d) {
+  const p = S.plans[d]; if (!p) return [];
+  const busy = busyOn(d);
+  return p.blocks.filter(b => busy.some(([x,y]) => toMin(b.start) < y && toMin(b.end) > x));
+}
+function replanIfNeeded(d, reason) {
+  const c = conflicts(d);
+  if (!c.length) return 0;
+  const p = localPlan(d);
+  p.tip = `${reason} 때문에 겹친 할 일 ${new Set(c.map(b=>b.taskId)).size}개를 빈 시간으로 옮겼어요. 더 꼼꼼히 짜려면 AI 자동 배치를 다시 눌러 보세요.`;
+  S.plans[d] = p;
+  return c.length;
+}
+
+/* 급한 일정 자연어 해석 */
+function localParse(text) {
+  let date = today(), s = text;
+  if (/모레/.test(s)) date = addDays(today(), 2); else if (/내일/.test(s)) date = addDays(today(), 1);
+  const md = /(\d{1,2})\s*월\s*(\d{1,2})\s*일/.exec(s);
+  if (md) { const y = new Date().getFullYear(); date = `${y}-${pad(md[1])}-${pad(md[2])}`; }
+  let start = null;
+  const hm = /(\d{1,2}):(\d{2})/.exec(s);
+  const kr = /(오전|오후|저녁|밤|아침)?\s*(\d{1,2})\s*시\s*(반|(\d{1,2})\s*분)?/.exec(s);
+  if (hm) start = (+hm[1]) * 60 + (+hm[2]);
+  else if (kr) {
+    let h = +kr[2]; const ap = kr[1];
+    if ((ap === "오후" || ap === "저녁" || ap === "밤") && h < 12) h += 12;
+    else if (!ap && h >= 1 && h <= 7) h += 12;
+    start = h * 60 + (kr[3] === "반" ? 30 : kr[4] ? +kr[4] : 0);
+  }
+  if (start == null) return null;
+  let len = 60;
+  const dh = /(\d+(?:\.\d+)?)\s*시간/.exec(s.replace(kr?.[0] || "", "")), dm = /(\d+)\s*분\s*(동안|간)?/.exec(s.replace(kr?.[0] || "", ""));
+  if (dh) len = Math.round(parseFloat(dh[1]) * 60) + (dm ? +dm[1] : 0); else if (dm && dm[2]) len = +dm[1];
+  const title = s.replace(/(오늘|내일|모레)/g, "").replace(md?.[0] || "", "").replace(hm?.[0] || "", "").replace(kr?.[0] || "", "")
+    .replace(/\d+(?:\.\d+)?\s*시간(\s*\d+\s*분)?/g, "").replace(/\d+\s*분\s*(동안|간)?/g, "").replace(/(동안|에|부터)\b/g, "").replace(/\s+/g, " ").trim() || "급한 일정";
+  return { title, date, start: fromMin(start), end: fromMin(start + len) };
+}
+async function parseSudden(text) {
+  try {
+    const n = new Date();
+    const r = await callAI({ kind: "parse", text, today: today(), weekday: WD[n.getDay()], now: fromMin(n.getHours()*60+n.getMinutes()) });
+    if (r && /^\d{4}-\d{2}-\d{2}$/.test(r.date) && toMin(r.end) > toMin(r.start))
+      return { title: String(r.title || "급한 일정").slice(0, 60), date: r.date, start: fromMin(toMin(r.start)), end: fromMin(toMin(r.end)) };
+  } catch {}
+  return localParse(text);
+}
+
+/* ---------- 알람 ---------- */
+let audioCtx = null, armed = null, ringTimer = null, beepTimer = null;
+function beep() {
+  if (!audioCtx) return;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = "triangle"; o.frequency.value = 880;
+  g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.3, audioCtx.currentTime + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.5);
+  o.connect(g).connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + 0.55);
+}
+function checkAlarm() {
+  if (!armed) return;
+  const n = new Date(), nowM = n.getHours()*60 + n.getMinutes();
+  if (ds(n) === armed.date && nowM >= armed.min && nowM < armed.min + 30) {
+    $("ringBox").hidden = false; $("ringText").textContent = `${fromMin(armed.min)} · 일어날 시간이에요`;
+    if (!beepTimer) { beep(); beepTimer = setInterval(beep, 1200); }
+  }
+}
+function stopRing() { clearInterval(beepTimer); beepTimer = null; $("ringBox").hidden = true; armed = null; renderAlarm(); }
+
+/* ---------- 렌더 ---------- */
+function renderAlarm() {
+  const wi = wakeInfo(view), st = S.settings;
+  $("alarmDay").textContent = dayLabel(view);
+  $("wakeTime").innerHTML = `${fromMin(wi.wake)}<small>기상</small>`;
+  const sw = $("bfSwitch"); sw.setAttribute("aria-checked", String(wi.bf));
+  const c = $("wakeCalc");
+  if (wi.first) {
+    c.innerHTML = `<span>첫 일정 <b>${esc(wi.first.start)}</b> ${esc(wi.first.title)}</span><span class="op">−</span><span>이동 <b>${+st.travel}분</b></span><span class="op">−</span><span>준비 <b>${+st.prep}분</b></span>` +
+      (wi.bf ? `<span class="op">−</span><span>아침 <b>${+st.meal}분</b></span>` : `<span class="op">·</span><span>아침 건너뜀 (+${+st.meal}분 더 잠)</span>`) +
+      (wi.clamped ? `<span style="color:var(--danger)">기상 한계(${esc(st.earliest)})에 맞췄어요</span>` : "");
+  } else {
+    c.innerHTML = `<span>이날은 고정 일정이 없어서 여유 기상 시간으로 맞췄어요</span>`;
+  }
+  const isArmed = armed && armed.date === view && armed.min === wi.wake;
+  $("armBtn").textContent = isArmed ? "알람 켜짐 · 끄기" : "이 시간에 알람 켜기";
+  $("armHint").textContent = isArmed
+    ? `${dayLabel(view)} ${fromMin(wi.wake)}에 울려요. 이 탭을 열어 두세요. 휴대폰 시계에도 같은 시간을 맞춰 두면 확실해요.`
+    : "알람은 이 페이지를 열어 둔 동안 울려요. 휴대폰 시계 앱에도 같은 시간으로 맞춰 두면 확실해요.";
+}
+
+function renderTasks() {
+  const list = $("taskList"), p = S.plans[view];
+  const placed = new Map(); (p?.blocks || []).forEach(b => { if (!placed.has(b.taskId)) placed.set(b.taskId, b.start); });
+  const uns = new Set(p?.unscheduled || []);
+  const items = S.tasks.slice().sort((a,b) => a.done - b.done || a.priority - b.priority || (a.due||"9999").localeCompare(b.due||"9999"));
+  $("taskCount").textContent = `${S.tasks.filter(t=>!t.done).length}개 남음`;
+  if (!items.length) { list.innerHTML = `<li style="grid-template-columns:1fr;color:var(--muted);font-size:13px">아직 할 일이 없어요. 위에서 추가해 보세요.</li>`; return; }
+  const PL = {1:"높음",2:"보통",3:"낮음"};
+  list.innerHTML = items.map(t => {
+    const overdue = t.due && t.due < today() && !t.done;
+    const where = placed.has(t.id) ? `<span>· ${esc(placed.get(t.id))} 배치</span>` : uns.has(t.id) ? `<span class="unsched">· 오늘 자리 없음</span>` : "";
+    return `<li class="${t.done ? "done" : ""}">
+      <input type="checkbox" data-done="${esc(t.id)}" ${t.done ? "checked" : ""} aria-label="완료">
+      <div style="min-width:0"><div class="tt">${esc(t.title)}</div>
+        <div class="tm"><span class="chip c-p${t.priority}">${PL[t.priority]}</span><span>${dur(t.minutes)}</span>${t.due ? `<span ${overdue ? 'class="unsched"' : ""}>마감 ${esc(t.due.slice(5).replace("-","/"))}</span>` : ""}${where}</div></div>
+      <button class="btn-ghost btn-sm" data-del="${esc(t.id)}" aria-label="삭제">삭제</button></li>`;
+  }).join("");
+}
+
+function renderTimeline() {
+  $("tlDate").textContent = dayLabel(view);
+  const p = S.plans[view], wi = wakeInfo(view);
+  const conflictSet = new Set(conflicts(view).map(b => b.taskId + b.start));
+  const rows = [];
+  rows.push({ s: wi.wake, e: wi.wake, kind: "wake" });
+  eventsOn(view).forEach(e => rows.push({ s: toMin(e.start), e: toMin(e.end), kind: e.kind, ev: e }));
+  (p?.blocks || []).forEach(b => { const t = S.tasks.find(x => x.id === b.taskId); if (t) rows.push({ s: toMin(b.start), e: toMin(b.end), kind: "task", t, b }); });
+  rows.sort((a,b) => a.s - b.s || (a.kind === "wake" ? -1 : 1));
+  const tl = $("timeline");
+  if (rows.length === 1) {
+    tl.innerHTML = `<div class="empty"><strong style="color:var(--ink)">${esc(dayLabel(view))}은 아직 비어 있어요</strong>
+      <span>수업 같은 고정 일정과 할 일을 추가한 뒤 <b>AI 자동 배치</b>를 눌러 보세요.</span>
+      <button id="loadSample" class="btn-sm">예시 일정으로 채워 보기</button></div>`;
+    $("loadSample").onclick = loadSample;
+  } else {
+    let html = "", lastEnd = null;
+    for (const r of rows) {
+      if (lastEnd != null && r.kind !== "wake" && r.s - lastEnd >= 30) html += `<div class="slot"><div></div><div class="gap">빈 시간 ${dur(r.s - lastEnd)}</div></div>`;
+      if (r.kind === "wake") {
+        html += `<div class="slot"><div class="t">${fromMin(r.s)}</div><div class="item k-wake"><span class="title">기상</span><span class="meta">${wi.bf ? `아침 먹고 출발 (${+S.settings.meal}분)` : "아침 건너뜀"} · 준비 ${+S.settings.prep}분</span></div></div>`;
+        lastEnd = wi.first ? toMin(wi.first.start) : wi.ready; continue;
+      }
+      if (r.kind === "task") {
+        const bad = conflictSet.has(r.t.id + r.b.start);
+        html += `<div class="slot"><div class="t">${fromMin(r.s)}</div><div class="item k-task ${r.t.done ? "k-done" : ""}">
+          <span class="title">${esc(r.t.title)}</span>
+          <span class="meta"><span class="chip c-task">할 일 · ${esc(p.by)}</span><span>${fromMin(r.s)}–${fromMin(r.e)} · ${dur(r.e - r.s)}</span>${bad ? '<span class="chip c-conflict">일정과 겹침</span>' : ""}</span></div></div>`;
+      } else {
+        const e = r.ev, sud = e.kind === "sudden";
+        html += `<div class="slot"><div class="t">${esc(e.start)}</div><button class="item ${sud ? "k-sudden" : "k-fixed"}" data-edit="${esc(e.id)}">
+          <span class="title">${esc(e.title)}</span>
+          <span class="meta"><span class="chip ${sud ? "c-sudden" : "c-fixed"}">${sud ? "급한 일정" : "고정"}</span>${e.changed ? `<span class="chip c-changed">변경됨</span><span>원래 ${esc(e.orig)}</span>` : ""}<span>${esc(e.start)}–${esc(e.end)}</span><span>· 눌러서 수정</span></span></button></div>`;
+      }
+      lastEnd = Math.max(lastEnd ?? 0, r.e);
+    }
+    tl.innerHTML = html;
+  }
+  const tip = $("aiTip");
+  if (p) {
+    const u = (p.unscheduled || []).length;
+    tip.innerHTML = `<b>${esc(p.by === "AI" ? "AI 배치" : "자동 배치")}</b> · ${esc(p.tip || "빈 시간에 맞춰 배치했어요.")}${u ? ` <span class="unsched">(${u}개는 자리가 없어 남겨 뒀어요)</span>` : ""}`;
+  } else tip.innerHTML = "할 일을 넣고 <b>AI 자동 배치</b>를 누르면 빈 시간에 맞춰 하루를 짜 줘요.";
+}
+
+function renderSettings() {
+  const st = S.settings;
+  $("sPrep").value = st.prep; $("sTravel").value = st.travel; $("sMeal").value = st.meal;
+  $("sDayStart").value = st.dayStart; $("sDayEnd").value = st.dayEnd; $("sFree").value = st.free; $("sEarliest").value = st.earliest;
+}
+function render() { $("datePick").value = view; renderAlarm(); renderTimeline(); renderTasks(); }
+
+/* ---------- 예시 ---------- */
+function loadSample() {
+  const d = view, ex = (t, s, e) => ({ id: uid(), date: d, title: t, start: s, end: e, kind: "fixed" });
+  S.events.push(ex("[예시] 데이터베이스 수업", "10:30", "12:00"), ex("[예시] AI활용 수업", "13:30", "15:00"), ex("[예시] 카페 알바", "18:00", "21:00"));
+  S.tasks.push(
+    { id: uid(), title: "[예시] AI활용 프로젝트 기획서", minutes: 90, priority: 1, due: addDays(d, 1), done: false },
+    { id: uid(), title: "[예시] 영어 단어 복습", minutes: 30, priority: 2, due: null, done: false },
+    { id: uid(), title: "[예시] 헬스장", minutes: 60, priority: 3, due: null, done: false });
+  save(); render(); toast("예시를 넣었어요. AI 자동 배치를 눌러 보세요.");
+}
+
+/* ---------- 이벤트 ---------- */
+$("datePick").onchange = e => { if (e.target.value) { view = e.target.value; render(); } };
+$("prevDay").onclick = () => { view = addDays(view, -1); render(); };
+$("nextDay").onclick = () => { view = addDays(view, 1); render(); };
+$("todayBtn").onclick = () => { view = today(); render(); };
+$("tmrBtn").onclick = () => { view = addDays(today(), 1); render(); };
+
+$("bfSwitch").onclick = () => { S.breakfast[view] = !hasBreakfast(view); save(); renderAlarm(); renderTimeline();
+  toast(hasBreakfast(view) ? "아침 먹는 걸로 기상 시간을 당겼어요" : `아침을 건너뛰고 ${+S.settings.meal}분 더 자요`); };
+
+$("armBtn").onclick = () => {
+  const wi = wakeInfo(view);
+  if (armed && armed.date === view && armed.min === wi.wake) { armed = null; clearInterval(ringTimer); renderAlarm(); toast("알람을 껐어요"); return; }
+  try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume?.(); } catch {}
+  armed = { date: view, min: wi.wake };
+  clearInterval(ringTimer); ringTimer = setInterval(checkAlarm, 15000); checkAlarm();
+  renderAlarm(); toast(`${dayLabel(view)} ${fromMin(wi.wake)} 알람을 켰어요`);
+};
+$("ringStop").onclick = stopRing;
+$("copyAlarm").onclick = async () => {
+  const wi = wakeInfo(view), txt = `${dayLabel(view)} 기상 ${fromMin(wi.wake)}`;
+  try { await navigator.clipboard.writeText(txt); toast("복사했어요: " + txt); } catch { toast(txt); }
+};
+
+$("suddenForm").onsubmit = async e => {
+  e.preventDefault();
+  const text = $("suddenText").value.trim(); if (!text) return;
+  const b = $("suddenBtn"); b.disabled = true; b.innerHTML = '<span class="spin"></span>';
+  const ev = await parseSudden(text);
+  b.disabled = false; b.textContent = "추가";
+  if (!ev) { toast("시간을 못 찾았어요. ‘3시’, ‘오후 4시 반’, ‘15:00’처럼 시간을 넣어 주세요."); return; }
+  S.events.push({ id: uid(), ...ev, kind: "sudden" });
+  const moved = replanIfNeeded(ev.date, `급한 일정 ‘${ev.title}’`);
+  view = ev.date; $("suddenText").value = "";
+  save(); render();
+  toast(`${dayLabel(ev.date)} ${ev.start}–${ev.end} ‘${ev.title}’ 추가${moved ? " · 겹친 할 일을 옮겼어요" : ""}`);
+};
+
+$("eventForm").onsubmit = e => {
+  e.preventDefault();
+  const title = $("evTitle").value.trim(), s = $("evStart").value, en = $("evEnd").value;
+  if (!title || !(toMin(en) > toMin(s))) { toast("끝나는 시간이 시작보다 늦어야 해요"); return; }
+  const n = $("evWeekly").checked ? 4 : 1;
+  for (let i = 0; i < n; i++) S.events.push({ id: uid(), date: addDays(view, i * 7), title, start: s, end: en, kind: "fixed" });
+  const moved = replanIfNeeded(view, `새 일정 ‘${title}’`);
+  $("evTitle").value = ""; save(); render();
+  toast(`‘${title}’ 일정을 추가했어요${n > 1 ? " (4주 반복)" : ""}${moved ? " · 겹친 할 일을 옮겼어요" : ""}`);
+};
+
+$("taskForm").onsubmit = e => {
+  e.preventDefault();
+  const title = $("tkTitle").value.trim(); if (!title) return;
+  S.tasks.push({ id: uid(), title, minutes: +$("tkMin").value, priority: +$("tkPri").value, due: $("tkDue").value || null, done: false });
+  $("tkTitle").value = ""; save(); renderTasks(); toast("할 일을 추가했어요. AI 자동 배치로 시간을 잡아 보세요.");
+};
+$("taskList").onclick = e => {
+  const del = e.target.closest("[data-del]");
+  if (del) { const id = del.dataset.del; S.tasks = S.tasks.filter(t => t.id !== id);
+    for (const p of Object.values(S.plans)) p.blocks = (p.blocks||[]).filter(b => b.taskId !== id);
+    save(); render(); }
+};
+$("taskList").onchange = e => {
+  const cb = e.target.closest("[data-done]");
+  if (cb) { const t = S.tasks.find(x => x.id === cb.dataset.done); if (t) { t.done = cb.checked; save(); render(); } }
+};
+
+$("aiPlan").onclick = () => aiPlan(view);
+$("clearPlan").onclick = () => { delete S.plans[view]; save(); render(); };
+
+/* 일정 수정 시트 */
+let editing = null;
+$("timeline").onclick = e => {
+  const b = e.target.closest("[data-edit]"); if (!b) return;
+  editing = S.events.find(x => x.id === b.dataset.edit); if (!editing) return;
+  $("shTitle").value = editing.title; $("shDate").value = editing.date; $("shStart").value = editing.start; $("shEnd").value = editing.end;
+  $("shNote").textContent = "시간을 바꾸면 ‘변경됨’으로 표시되고, 겹치는 할 일은 자동으로 옮겨져요.";
+  $("sheet").hidden = false; $("shTitle").focus();
+};
+const closeSheet = () => { $("sheet").hidden = true; editing = null; };
+$("shCancel").onclick = closeSheet;
+$("sheet").onclick = e => { if (e.target === $("sheet")) closeSheet(); };
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("sheet").hidden) closeSheet(); });
+$("sheetForm").onsubmit = e => {
+  e.preventDefault(); if (!editing) return;
+  const s = $("shStart").value, en = $("shEnd").value, d = $("shDate").value;
+  if (!(toMin(en) > toMin(s))) { $("shNote").textContent = "끝나는 시간이 시작보다 늦어야 해요."; return; }
+  const oldDate = editing.date;
+  const moved = editing.start !== s || editing.end !== en || editing.date !== d;
+  if (moved && !editing.changed) { editing.orig = `${editing.date === d ? "" : editing.date.slice(5).replace("-","/") + " "}${editing.start}–${editing.end}`; editing.changed = true; }
+  Object.assign(editing, { title: $("shTitle").value.trim() || editing.title, start: s, end: en, date: d });
+  const n = replanIfNeeded(d, `바뀐 일정 ‘${editing.title}’`);
+  if (oldDate !== d && S.plans[oldDate]) replanIfNeeded(oldDate, "일정 변경");
+  closeSheet(); view = d; save(); render();
+  toast(moved ? `일정을 바꿨어요${n ? " · 겹친 할 일을 옮겼어요" : ""}` : "저장했어요");
+};
+$("shDelete").onclick = () => {
+  if (!editing) return;
+  S.events = S.events.filter(x => x.id !== editing.id); closeSheet(); save(); render(); toast("일정을 삭제했어요");
+};
+
+/* 설정 */
+const bindSetting = (id, key, num) => $(id).onchange = e => { const v = e.target.value; if (v === "") return; S.settings[key] = num ? Math.max(0, +v) : v; save(); render(); };
+bindSetting("sPrep","prep",1); bindSetting("sTravel","travel",1); bindSetting("sMeal","meal",1);
+bindSetting("sDayStart","dayStart"); bindSetting("sDayEnd","dayEnd"); bindSetting("sFree","free"); bindSetting("sEarliest","earliest");
+$("resetAll").onclick = () => { $("resetConfirm").hidden = false; };
+$("resetNo").onclick = () => { $("resetConfirm").hidden = true; };
+$("resetYes").onclick = () => { S = DEFAULT(); $("resetConfirm").hidden = true; save(); renderSettings(); render(); toast("모든 데이터를 지웠어요"); };
+
+/* ---------- 시작 ---------- */
+const local = lsRead(); if (local) S = normalize(local);
+renderSettings(); render();
+$("syncStatus").textContent = "이 기기에 저장돼요 · 로그인 없이 바로 써요";
+setInterval(() => { if (view === today()) renderTimeline(); }, 60000);
+// 앱으로 다시 돌아오면 날짜가 바뀌었을 수 있으니 새로 그림
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { checkAlarm(); render(); } });
+
+/* PWA: 서비스 워커 + 아이폰 설치 안내 */
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+const standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+let tipClosed = false; try { tipClosed = localStorage.getItem("haru-install-closed") === "1"; } catch {}
+if (isIOS && !standalone && !tipClosed) $("installTip").hidden = false;
+$("installClose").onclick = () => { $("installTip").hidden = true; try { localStorage.setItem("haru-install-closed", "1"); } catch {} };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "하루 플래너",
+  "short_name": "하루",
+  "description": "할 일과 급한 일정을 AI가 하루에 배치하고, 아침식사 여부에 맞춰 기상 시간을 계산해요.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#EEF1F6",
+  "theme_color": "#172033",
+  "lang": "ko",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
